@@ -1,0 +1,33 @@
+# Environments and dependencies
+.venv/
+venv/
+ENV/
+env/
+node_modules/
+dist/
+build/
+
+# Local configuration and API secrets
+.env
+*.env
+
+# Databases
+db.sqlite3
+*.sqlite3
+
+# Python caches and metadata
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs
+*.log
+logs/
+
+# OS specific files
+.DS_Store
+Thumbs.db
