@@ -79,7 +79,7 @@ Clone this repository and open the terminal in the root folder:
     ```
 2.  **Install dependencies**:
     ```powershell
-    pip install -r requirements.txt
+    uv pip install -r requirements.txt
     ```
 3.  **Configure environment variables**:
     Create a `.env` file in the root folder (same directory as `manage.py`):
