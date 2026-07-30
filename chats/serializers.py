@@ -41,3 +41,8 @@ class ChatMessageSerializer(serializers.Serializer):
         default='openai',
         help_text="The LLM provider to process this message."
     )
+    web_search = serializers.BooleanField(
+        required=False,
+        default=False,
+        help_text="Whether to enable Web Search via Tavily."
+    )

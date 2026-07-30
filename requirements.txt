@@ -5,3 +5,4 @@ langchain
 langchain-openai
 langchain-google-genai
 langchain-mistralai
+langchain-tavily

@@ -13,7 +13,9 @@ import {
   UserCheck,
   MoreVertical,
   ArrowUp,
-  ArrowDown
+  ArrowDown,
+  Globe,
+  ExternalLink
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { api } from './api';
@@ -81,6 +83,12 @@ function App() {
   const [loadingChatDetails, setLoadingChatDetails] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
   const [newMessageText, setNewMessageText] = useState('');
+
+  // Web Search States
+  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+  const [activeSearchQuery, setActiveSearchQuery] = useState('');
+  const [activeSearchResults, setActiveSearchResults] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
 
   // Scroll Toggle States & Refs
   const [scrollDirection, setScrollDirection] = useState('up'); // 'up' or 'down'
@@ -326,8 +334,19 @@ function App() {
     if (!newMessageText.trim() || sendingMessage || !activeSessionId) return;
 
     const userPrompt = newMessageText;
+    const isSearchActive = webSearchEnabled;
     setNewMessageText('');
     setSendingMessage(true);
+
+    if (isSearchActive) {
+      setIsSearching(true);
+      setActiveSearchQuery('Searching the web...');
+      setActiveSearchResults([]);
+    } else {
+      setIsSearching(false);
+      setActiveSearchQuery('');
+      setActiveSearchResults([]);
+    }
 
     // Optimistic UI update: show human message instantly
     const dummyHumanMessage = {
@@ -380,7 +399,11 @@ function App() {
       const response = await fetch(`/api/chats/${currentSessionId}/message/`, {
         method: 'POST',
         headers: headers,
-        body: JSON.stringify({ message: userPrompt, model_provider: selectedModel })
+        body: JSON.stringify({ 
+          message: userPrompt, 
+          model_provider: selectedModel,
+          web_search: isSearchActive 
+        })
       });
 
       if (!response.ok) {
@@ -404,12 +427,16 @@ function App() {
           title: prev ? prev.title : 'New Chat',
           messages: [
             ...currentMessages,
-            { type: 'ai', data: { content: "" } }
+            { 
+              type: 'ai', 
+              data: { content: "" }, 
+              isSearchActive: isSearchActive,
+              searchQuery: isSearchActive ? 'Searching the web...' : '',
+              sources: [] 
+            }
           ]
         };
       });
-      // Turn off sendingMessage typing indicator since we are now rendering chunk tokens in real-time
-      setSendingMessage(false);
 
       while (true) {
         const { value, done } = await reader.read();
@@ -433,7 +460,72 @@ function App() {
                 throw new Error(data.error);
               }
 
-              if (data.done) {
+              if (data.type === 'search_start') {
+                // Behavior 1: Tool search query received, update loading bar query text
+                setIsSearching(true);
+                const qText = data.query ? `Searching for "${data.query}"...` : 'Searching the web...';
+                setActiveSearchQuery(qText);
+
+                setActiveSessionDetails(prev => {
+                  if (!prev) return null;
+                  const msgs = [...(prev.messages || [])];
+                  if (msgs.length > 0 && msgs[msgs.length - 1].type === 'ai') {
+                    msgs[msgs.length - 1] = {
+                      ...msgs[msgs.length - 1],
+                      isSearchActive: true,
+                      searchQuery: qText
+                    };
+                  }
+                  return { ...prev, messages: msgs };
+                });
+              }
+              else if (data.type === 'search_results') {
+                // Behavior 2: Tool response came! Hide loading bar & show sources IMMEDIATELY!
+                setIsSearching(false);
+                setActiveSearchQuery('');
+                setActiveSearchResults(data.results || []);
+
+                setActiveSessionDetails(prev => {
+                  if (!prev) return null;
+                  const msgs = [...(prev.messages || [])];
+                  if (msgs.length > 0 && msgs[msgs.length - 1].type === 'ai') {
+                    msgs[msgs.length - 1] = {
+                      ...msgs[msgs.length - 1],
+                      isSearchActive: false,
+                      searchQuery: '',
+                      sources: data.results || []
+                    };
+                  }
+                  return { ...prev, messages: msgs };
+                });
+              }
+              else if (data.chunk) {
+                // Behavior 3: Streaming final LLM response above sources!
+                setIsSearching(false);
+                setActiveSearchQuery('');
+                aiContent += data.chunk;
+                
+                // Update the last message in the activeSessionDetails state
+                setActiveSessionDetails(prev => {
+                  if (!prev) return null;
+                  const msgs = [...(prev.messages || [])];
+                  if (msgs.length > 0 && msgs[msgs.length - 1].type === 'ai') {
+                    const currentMsg = msgs[msgs.length - 1];
+                    msgs[msgs.length - 1] = {
+                      ...currentMsg,
+                      isSearchActive: false,
+                      data: { ...currentMsg.data, content: aiContent },
+                      sources: currentMsg.sources && currentMsg.sources.length > 0 ? currentMsg.sources : activeSearchResults
+                    };
+                  }
+                  return { ...prev, messages: msgs };
+                });
+              }
+              else if (data.done) {
+                setIsSearching(false);
+                setActiveSearchQuery('');
+                setActiveSearchResults([]);
+
                 // Final full message history sync
                 setActiveSessionDetails({
                   id: currentSessionId,
@@ -450,26 +542,6 @@ function App() {
                 }));
                 break;
               }
-
-              if (data.chunk) {
-                aiContent += data.chunk;
-                
-                // Update the last message in the activeSessionDetails state
-                setActiveSessionDetails(prev => {
-                  if (!prev) return null;
-                  const msgs = [...(prev.messages || [])];
-                  if (msgs.length > 0) {
-                    const lastMsg = msgs[msgs.length - 1];
-                    if (lastMsg.type === 'ai') {
-                      msgs[msgs.length - 1] = {
-                        ...lastMsg,
-                        data: { ...lastMsg.data, content: aiContent }
-                      };
-                    }
-                  }
-                  return { ...prev, messages: msgs };
-                });
-              }
             } catch (err) {
               console.error("Error parsing SSE chunk:", err);
             }
@@ -479,6 +551,10 @@ function App() {
 
     } catch (err) {
       console.error("Failed to send message:", err);
+      setIsSearching(false);
+      setActiveSearchQuery('');
+      setActiveSearchResults([]);
+
       const errMsg = err.message || err.data?.error || "Error generating response. Please check API keys.";
       
       // Inject error message in UI
@@ -505,6 +581,8 @@ function App() {
         };
       });
     } finally {
+      setIsSearching(false);
+      setActiveSearchQuery('');
       setSendingMessage(false);
     }
   };
@@ -800,33 +878,104 @@ function App() {
                       const content = msg.data?.content || '';
                       const isError = msg.data?.isError || false;
                       
+                      // Filter out intermediate tool messages and empty tool-calling requests
+                      const isToolMessage = msg.type === 'tool';
+                      const isToolCallRequest = msg.type === 'ai' && msg.data?.tool_calls?.length > 0 && !content;
+                      if (isToolMessage || isToolCallRequest) {
+                        return null;
+                      }
+
+                      // Extract / Gather Sources
+                      let sources = msg.sources || [];
+                      if (!sources.length && !isUser) {
+                        // Look back in previous messages for a ToolMessage
+                        for (let i = index - 1; i >= 0; i--) {
+                          const prevMsg = activeSessionDetails.messages[i];
+                          if (prevMsg.type === 'human') break;
+                          if (prevMsg.type === 'tool' && prevMsg.data?.content) {
+                            try {
+                              const toolData = JSON.parse(prevMsg.data.content);
+                              if (toolData.results) {
+                                sources = toolData.results;
+                              }
+                            } catch (e) {}
+                          }
+                        }
+                      }
+
+                      const showLoadingBar = !isUser && (msg.isSearchActive || (sendingMessage && index === activeSessionDetails.messages.length - 1 && webSearchEnabled && !content && !sources.length));
+
                       return (
                         <div key={index} className={`message-wrapper ${isUser ? 'user' : 'ai'}`}>
                           <div className="message-avatar">
                             {isUser ? <UserIcon size={18} /> : <Bot size={18} />}
                           </div>
                           <div className={`message-bubble ${isError ? 'message-error' : ''}`}>
-                            <SafeMarkdown>{content}</SafeMarkdown>
+                            
+                            {/* Behavior 1: Loading bar after user input, until tool response comes */}
+                            {showLoadingBar && (
+                              <div className="search-loading-container">
+                                <div className="search-loading-header">
+                                  <Globe className="search-loading-icon spin-pulse" size={15} />
+                                  <span>{msg.searchQuery || activeSearchQuery || 'Searching the web...'}</span>
+                                </div>
+                                <div className="search-loading-bar-track">
+                                  <div className="search-loading-bar-fill"></div>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Standard non-search typing indicator inside single AI bubble */}
+                            {!content && !showLoadingBar && (!sources || !sources.length) && sendingMessage && index === activeSessionDetails.messages.length - 1 && (
+                              <div className="typing-indicator">
+                                <span className="typing-dot"></span>
+                                <span className="typing-dot"></span>
+                                <span className="typing-dot"></span>
+                              </div>
+                            )}
+
+                            {/* Behavior 3: Streamed LLM response text */}
+                            {content && <SafeMarkdown>{content}</SafeMarkdown>}
+
+                            {/* Behavior 2 & 3: Sources displayed immediately after tool response & positioned below LLM response */}
+                            {sources && sources.length > 0 && (
+                              <div className="message-sources-container">
+                                <div className="sources-header">
+                                  <Globe size={13} />
+                                  <span>Sources ({sources.length}):</span>
+                                </div>
+                                <div className="sources-list">
+                                  {sources.map((src, sIdx) => {
+                                    let hostname = '';
+                                    try {
+                                      hostname = new URL(src.url).hostname.replace('www.', '');
+                                    } catch {
+                                      hostname = src.url;
+                                    }
+                                    return (
+                                      <a 
+                                        key={sIdx} 
+                                        href={src.url} 
+                                        target="_blank" 
+                                        rel="noopener noreferrer" 
+                                        className="source-badge"
+                                        title={src.content || src.title}
+                                      >
+                                        <span className="source-index">{sIdx + 1}</span>
+                                        <span className="source-title">{src.title || hostname}</span>
+                                        <span className="source-domain">{hostname}</span>
+                                        <ExternalLink size={10} className="source-link-icon" />
+                                      </a>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )}
+
                           </div>
                         </div>
                       );
                     })}
-                    
-                    {/* Typing / Loading response indicator */}
-                    {sendingMessage && (
-                      <div className="message-wrapper ai">
-                        <div className="message-avatar">
-                          <Bot size={18} />
-                        </div>
-                        <div className="message-bubble">
-                          <div className="typing-indicator">
-                            <span className="typing-dot"></span>
-                            <span className="typing-dot"></span>
-                            <span className="typing-dot"></span>
-                          </div>
-                        </div>
-                      </div>
-                    )}
                     
                     {/* Reference to scroll to bottom */}
                     <div ref={messagesEndRef} />
@@ -849,10 +998,19 @@ function App() {
             {/* Message Input container */}
             <footer className="chat-input-container">
               <form className="chat-input-form" onSubmit={handleSendMessage}>
+                <button
+                  type="button"
+                  className={`btn-web-search ${webSearchEnabled ? 'active' : ''}`}
+                  onClick={() => setWebSearchEnabled(!webSearchEnabled)}
+                  title={webSearchEnabled ? "Web Search enabled (click to disable)" : "Enable Web Search"}
+                >
+                  <Globe size={18} />
+                  {webSearchEnabled && <span className="web-search-label">Search</span>}
+                </button>
                 <textarea 
                   className="chat-input-field" 
                   rows="1"
-                  placeholder="Type a message..."
+                  placeholder={webSearchEnabled ? "Search web & ask anything..." : "Type a message..."}
                   value={newMessageText}
                   onChange={(e) => setNewMessageText(e.target.value)}
                   onKeyDown={(e) => {
