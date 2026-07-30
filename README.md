@@ -1,11 +1,11 @@
 # Enterprise Multi-LLM Chatbot
 
-An advanced, full-stack ChatGPT-like assistant featuring a premium glassmorphic dark UI, real-time Server-Sent Events (SSE) streaming, and dynamic on-the-fly LLM provider switching (OpenAI, Google Gemini, and Mistral) without breaking the conversation state.
+An advanced, full-stack ChatGPT-like assistant featuring a premium glassmorphic dark UI, real-time Server-Sent Events (SSE) streaming, dynamic on-the-fly LLM provider switching (OpenAI, Google Gemini, and Mistral), and an integrated Web Search tool with live citation badges.
 
 [![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=flat&logo=python&logoColor=white)](https://www.python.org/)
 [![Django](https://img.shields.io/badge/Django-5.0-092E20?style=flat&logo=django&logoColor=white)](https://www.djangoproject.com/)
 [![Django REST Framework](https://img.shields.io/badge/DRF-3.15-red?style=flat)](https://www.django-rest-framework.org/)
-[![LangChain](https://img.shields.io/badge/LangChain-0.1-1C3C3A?style=flat&logoColor=white)](https://www.langchain.com/)
+[![LangChain](https://img.shields.io/badge/LangChain-0.3-1C3C3A?style=flat&logoColor=white)](https://www.langchain.com/)
 [![React](https://img.shields.io/badge/React-19.0-61DAFB?style=flat&logo=react&logoColor=black)](https://react.dev/)
 [![Vite](https://img.shields.io/badge/Vite-8.0-646CFF?style=flat&logo=vite&logoColor=white)](https://vite.dev/)
 
@@ -14,11 +14,11 @@ An advanced, full-stack ChatGPT-like assistant featuring a premium glassmorphic 
 ## 🚀 Key Features
 
 *   **Dynamic LLM Switching**: Swap between model providers (OpenAI `gpt-4o-mini`, Google Gemini `gemini-2.5-flash`, and Mistral `mistral-small-latest`) on-the-fly during a single active conversation thread.
+*   **Integrated Web Search (Tavily)**: Toggle live web search directly in the chat input box. Powered by LangChain's `create_agent` framework, it streams real-time search indicators and presents clickable source badges below the answer.
 *   **Real-time Streaming (SSE)**: Chat responses are pushed from the backend to the frontend token-by-token using `StreamingHttpResponse` and HTML5 Server-Sent Events.
 *   **Dual-Login Registration**: Fully-featured user signup and login APIs supporting authentication using either usernames or email addresses.
-*   **Deferred Session Creation**: Prevents sidebar clutter by postponing database creation of new chat threads until the first query is actually sent.
-*   **Safe Markdown Rendering**: Displays rich AI responses, tables, and code snippets natively using `react-markdown` and specialized glassmorphic stylesheet tags. Includes a custom React class-based Error Boundary to prevent crashes on partial/broken streaming chunks.
-*   **Conversational Operations**: Supports renaming chat thread titles, deleting threads via a 3-dots actions menu, and viewing conversation lists.
+*   **Safe Markdown Rendering**: Displays rich AI responses, tables, formatted text, and code snippets natively using `react-markdown` and custom glassmorphic styling.
+*   **Conversational Operations**: Supports renaming chat thread titles, deleting threads via a 3-dots actions menu, and managing conversation threads.
 *   **Viewport Scroll Toggle**: A floating action button that dynamically toggles between scrolling smoothly to the very top (first message) and the bottom (latest message) based on the scroll position.
 
 ---
@@ -28,12 +28,13 @@ An advanced, full-stack ChatGPT-like assistant featuring a premium glassmorphic 
 ### Backend
 *   **Python**: Core programming language.
 *   **Django**: High-level web framework.
-*   **Django REST Framework**: Built-in endpoints and Token Authentication.
-*   **LangChain**: Standardized adapters (`ChatOpenAI`, `ChatGoogleGenerativeAI`, `ChatMistralAI`) for loading histories, streaming, and aggregating tokens.
+*   **Django REST Framework**: Built-in REST endpoints and Token Authentication.
+*   **LangChain & LangGraph**: Standardized adapters (`ChatOpenAI`, `ChatGoogleGenerativeAI`, `ChatMistralAI`) and `create_agent` for tool calling and streaming.
+*   **Tavily Search API**: High-accuracy web search tool integration for factual retrieval.
 
 ### Frontend
 *   **React 19 & Vite**: Ultra-fast hot-reloading user interface compilation.
-*   **Lucide React**: Premium icon pack.
+*   **Lucide React**: Premium icon pack (`Globe`, `Search`, `MessageSquare`, `ExternalLink`, etc.).
 *   **React Markdown**: Renders response markup into clean HTML DOM nodes.
 
 ---
@@ -45,7 +46,7 @@ chatbot_project/          # Django Project Root
 │   ├── settings.py       # Configuration and DRF integrations
 │   └── urls.py           # Global routing configurations
 ├── accounts/             # Registration, Login views and serializations
-├── chats/                # ChatSession models, viewsets, and LLM integrations
+├── chats/                # ChatSession models, viewsets, Tavily search, and LLM integrations
 ├── frontend/             # React application (Vite template)
 │   ├── src/
 │   │   ├── api.js        # Axios-driven API client (auth, CRUD)
@@ -87,6 +88,7 @@ Clone this repository and open the terminal in the root folder:
     OPENAI_API_KEY=your-openai-api-key-here
     GOOGLE_API_KEY=your-google-api-key-here
     MISTRAL_API_KEY=your-mistral-api-key-here
+    TAVILY_API_KEY=your-tavily-api-key-here
     ```
 4.  **Run migrations**:
     ```powershell
@@ -121,7 +123,7 @@ Open a new terminal window in the `frontend/` directory:
 
 ## 🧪 Running Tests
 
-To run the automated test suite covering DRF authentication models, chat endpoints, and LLM stream mocks:
+To run the automated test suite covering DRF authentication models, chat endpoints, search serializers, and LLM stream mocks:
 
 ```powershell
 python manage.py test
@@ -134,5 +136,36 @@ python manage.py test
 ### Real-Time Streaming & Metadata Retention
 Rather than yielding raw text, the Django generator accumulatively combines token chunks using LangChain's native addition (`chunk1 + chunk2`). This resolves metadata fields (like token usage or models) in real-time. Upon completion, the backend maps this accumulated message chunk to a standard `AIMessage` containing all populated properties (`content`, `response_metadata`, `usage_metadata`, `id`) and saves it to the SQLite database.
 
-### Incomplete Token Crash Prevention (Error Boundary)
-Streaming incomplete markdown syntax (like a half-written bold block or unclosed list tag) can throw errors in traditional React rendering engines. The custom class-based `SafeMarkdown` component catches rendering exceptions from `react-markdown` locally and falls back to rendering raw text. Once a new chunk arrives, it resets the error state and attempts parsing again.
+### Web Search & 3-Stage Streaming Execution
+When Web Search is enabled via the input bar toggle:
+1. **Search Loading Bar**: An animated gradient loading bar appears in the AI bubble while waiting for search queries to execute.
+2. **Instant Citation Rendering**: As soon as Tavily search results return, source badge cards render immediately inside the message container.
+3. **Cited LLM Output**: The final LLM text response streams above the sources, leaving cited references neatly anchored below the answer.
+
+---
+
+## 🤝 Contributing
+
+Contributions, issues, and feature requests are welcome! Feel free to fork the repository and submit a Pull Request.
+
+### Recommended Git Branching Workflow
+
+To contribute to this project, please follow these steps:
+
+```bash
+# 1. Fetch latest changes and checkout main
+git checkout main
+git pull origin main
+
+# 2. Create a new feature branch
+git checkout -b feature/your-feature-name
+
+# 3. Add and commit changes
+git add .
+git commit -m "feat: description of your changes"
+
+# 4. Push the feature branch to GitHub
+git push -u origin feature/your-feature-name
+```
+
+Once pushed, open a Pull Request on GitHub into the `main` branch for review!
