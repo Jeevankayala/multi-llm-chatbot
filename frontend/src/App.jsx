@@ -229,24 +229,23 @@ function App() {
 
     try {
       if (isRegisterMode) {
-        // Register API also returns user details & token
-        const res = await api.register(username, email, password);
-        localStorage.setItem('auth_token', res.token);
-        localStorage.setItem('current_user', JSON.stringify(res.user));
-        setToken(res.token);
-        setCurrentUser(res.user);
+        await api.register(username, email, password);
+        setIsRegisterMode(false);
+        setPassword('');
+        setConfirmPassword('');
+        setAuthError(null);
+        alert("Registration successful! Please sign in with your credentials.");
       } else {
         const res = await api.login(username, password);
         localStorage.setItem('auth_token', res.token);
         localStorage.setItem('current_user', JSON.stringify(res.user));
         setToken(res.token);
         setCurrentUser(res.user);
+        setUsername('');
+        setEmail('');
+        setPassword('');
+        setConfirmPassword('');
       }
-      // Reset form
-      setUsername('');
-      setEmail('');
-      setPassword('');
-      setConfirmPassword('');
     } catch (err) {
       console.error("Authentication failed:", err);
       if (err.data) {
